@@ -239,7 +239,7 @@ class DbusShelly3emService:
        goe_data = self._getGoeChargerData()
        
        #send data to DBus
-       self._dbusservice['/Ac/Power'] = meter_data['total_power'] + int(data['nrg'][11] * 0.01 * 1000)  # positive: consumption, negative: feed into grid
+       self._dbusservice['/Ac/Power'] = meter_data['total_power'] + int(goe_data['nrg'][11] * 0.01 * 1000)  # positive: consumption, negative: feed into grid
        self._dbusservice['/Ac/L1/Voltage'] = meter_data['emeters'][0]['voltage']
        self._dbusservice['/Ac/L2/Voltage'] = meter_data['emeters'][1]['voltage']
        self._dbusservice['/Ac/L3/Voltage'] = meter_data['emeters'][2]['voltage']
