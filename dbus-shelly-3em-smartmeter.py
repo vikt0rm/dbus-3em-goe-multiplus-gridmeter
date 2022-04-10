@@ -127,7 +127,35 @@ class DbusShelly3emService:
     
     
     return meter_data
- 
+  
+  def _getGoeChargerStatusUrl(self):
+    config = self._getConfig()
+    accessType = config['DEFAULT']['AccessType']
+    
+    if accessType == 'OnPremise': 
+        URL = "http://%s/status" % (config['ONPREMISE']['GoEHost'])
+    else:
+        raise ValueError("AccessType %s is not supported" % (config['DEFAULT']['AccessType']))
+    
+    return URL
+  
+  
+  def _getGoeChargerData(self):
+    URL = self._getGoeChargerStatusUrl()
+    request_data = requests.get(url = URL)
+    
+    # check for response
+    if not request_data:
+        raise ConnectionError("No response from go-eCharger - %s" % (URL))
+    
+    json_data = request_data.json()     
+    
+    # check for Json
+    if not json_data:
+        raise ValueError("Converting response to JSON failed")
+      
+    return json_data
+  
  
   def _signOfLife(self):
     logging.info("--- Start: sign of life ---")
@@ -208,18 +236,19 @@ class DbusShelly3emService:
     try:
        #get data from Shelly 3em
        meter_data = self._getShellyData()
+       goe_data = self._getGoeChargerData()
        
        #send data to DBus
        self._dbusservice['/Ac/Power'] = meter_data['total_power'] # positive: consumption, negative: feed into grid
        self._dbusservice['/Ac/L1/Voltage'] = meter_data['emeters'][0]['voltage']
        self._dbusservice['/Ac/L2/Voltage'] = meter_data['emeters'][1]['voltage']
        self._dbusservice['/Ac/L3/Voltage'] = meter_data['emeters'][2]['voltage']
-       self._dbusservice['/Ac/L1/Current'] = meter_data['emeters'][0]['current']
-       self._dbusservice['/Ac/L2/Current'] = meter_data['emeters'][1]['current']
-       self._dbusservice['/Ac/L3/Current'] = meter_data['emeters'][2]['current']
-       self._dbusservice['/Ac/L1/Power'] = meter_data['emeters'][0]['power']
-       self._dbusservice['/Ac/L2/Power'] = meter_data['emeters'][1]['power']
-       self._dbusservice['/Ac/L3/Power'] = meter_data['emeters'][2]['power']
+       self._dbusservice['/Ac/L1/Current'] = meter_data['emeters'][0]['current'] + int(goe_data['nrg'][4] * 0.1)
+       self._dbusservice['/Ac/L2/Current'] = meter_data['emeters'][1]['current'] + int(goe_data['nrg'][5] * 0.1)
+       self._dbusservice['/Ac/L3/Current'] = meter_data['emeters'][2]['current'] + int(goe_data['nrg'][6] * 0.1)
+       self._dbusservice['/Ac/L1/Power'] = meter_data['emeters'][0]['power'] + int(goe_data['nrg'][7] * 0.1 * 1000)
+       self._dbusservice['/Ac/L2/Power'] = meter_data['emeters'][1]['power'] + int(goe_data['nrg'][8] * 0.1 * 1000)
+       self._dbusservice['/Ac/L3/Power'] = meter_data['emeters'][2]['power'] + int(goe_data['nrg'][9] * 0.1 * 1000)
        self._dbusservice['/Ac/L1/Energy/Forward'] = (meter_data['emeters'][0]['total']/1000)
        self._dbusservice['/Ac/L2/Energy/Forward'] = (meter_data['emeters'][1]['total']/1000)
        self._dbusservice['/Ac/L3/Energy/Forward'] = (meter_data['emeters'][2]['total']/1000)
@@ -231,7 +260,7 @@ class DbusShelly3emService:
        
        # only update Energy on first run or every 3min.
        if (self._lastMeterCounter == 0) or ((time.time() - self._lastMeterTime) > 180):
-            _totalForward = self._dbusservice['/Ac/L1/Energy/Forward'] + self._dbusservice['/Ac/L2/Energy/Forward'] + self._dbusservice['/Ac/L3/Energy/Forward']
+            _totalForward = self._dbusservice['/Ac/L1/Energy/Forward'] + self._dbusservice['/Ac/L2/Energy/Forward'] + self._dbusservice['/Ac/L3/Energy/Forward'] + int(float(goe_data['eto']) / 10.0)
             _totalReverse = self._dbusservice['/Ac/L1/Energy/Reverse'] + self._dbusservice['/Ac/L2/Energy/Reverse'] + self._dbusservice['/Ac/L3/Energy/Reverse']
             self._dbusservice['/Ac/Energy/Forward'], self._dbusservice['/Ac/Energy/Reverse'], self._dbusservice['/Debug'] = self._getBalancingMeterResult(_totalForward, _totalReverse)
             self._lastMeterTime = time.time()
