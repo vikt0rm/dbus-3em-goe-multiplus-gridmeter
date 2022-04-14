@@ -168,9 +168,9 @@ class DbusShelly3emService:
       # update last valid goeCharger values
       self._validGoeEnergy = int(float(json_data['eto']) / 10.0)
       self._validGoePower = int(json_data['nrg'][11] * 0.01 * 1000)
-      self._validGoeL1Power = int(json_data['nrg'][7] * 0.1)
-      self._validGoeL2Power = int(json_data['nrg'][8] * 0.1)
-      self._validGoeL3Power = int(json_data['nrg'][9] * 0.1)
+      self._validGoeL1Power = int(json_data['nrg'][7] * 0.1 * 1000)
+      self._validGoeL2Power = int(json_data['nrg'][8] * 0.1 * 1000)
+      self._validGoeL3Power = int(json_data['nrg'][9] * 0.1 * 1000)
       self._validGoeL1Current = int(json_data['nrg'][4] * 0.1)
       self._validGoeL2Current = int(json_data['nrg'][5] * 0.1)
       self._validGoeL3Current = int(json_data['nrg'][6] * 0.1)
