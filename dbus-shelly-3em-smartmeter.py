@@ -174,7 +174,7 @@ class DbusShelly3emService:
       self._validGoeL1Current = int(json_data['nrg'][4] * 0.1)
       self._validGoeL2Current = int(json_data['nrg'][5] * 0.1)
       self._validGoeL3Current = int(json_data['nrg'][6] * 0.1)
-      logging.info("goeData=> Energe: %s Power: %s L1Power: %s L2Power: %s L3Power: %s L1Current: %s L2Current: %s L3Current: %s" % 
+      logging.debug("goeData=> Energe: %s Power: %s L1Power: %s L2Power: %s L3Power: %s L1Current: %s L2Current: %s L3Current: %s" % 
                    (self._validGoeEnergy, 
                     self._validGoePower,
                     self._validGoeL1Power,
