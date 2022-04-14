@@ -174,6 +174,15 @@ class DbusShelly3emService:
       self._validGoeL1Current = int(json_data['nrg'][4] * 0.1)
       self._validGoeL2Current = int(json_data['nrg'][5] * 0.1)
       self._validGoeL3Current = int(json_data['nrg'][6] * 0.1)
+      logging.info("goeData=> Energe: %s Power: %s L1Power: %s L2Power: %s L3Power: %s L1Current: %s L2Current: %s L3Current: %s" % 
+                   (self._validGoeEnergy, 
+                    self._validGoePower,
+                    self._validGoeL1Power,
+                    self._validGoeL2Power,
+                    self._validGoeL3Power,
+                    self._validGoeL1Current,
+                    self._validGoeL2Current,
+                    self._validGoeL3Current))
                                 
     except requests.exceptions.RequestException as e:
       logging.info("reading goeCharger failed with " + repr(e))
