@@ -186,8 +186,6 @@ class DbusShelly3emService:
                                 
     except requests.exceptions.RequestException as e:
       logging.info("reading goeCharger failed with " + repr(e))
-          
-    return json_data
   
  
   def _signOfLife(self):
