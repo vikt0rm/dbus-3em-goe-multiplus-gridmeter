@@ -16,14 +16,15 @@ import sys
 import time
 import requests # for http GET
 import configparser # for config/ini file
+from dbus import SessionBus, SystemBus
  
 # our own packages from victron
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
-from vedbus import VeDbusService
+from vedbus import VeDbusService, VeDbusItemImport
 
 
 class DbusShelly3emService:
-  def __init__(self, paths, productname='Shelly 3EM', connection='Shelly 3EM HTTP JSON service'):
+  def __init__(self, paths, productname='Gridmeter 3em+goe+mp2', connection='Shelly 3EM HTTP JSON service'):
     config = self._getConfig()
     deviceinstance = int(config['DEFAULT']['DeviceInstance'])
     customname = config['DEFAULT']['CustomName']
@@ -40,6 +41,9 @@ class DbusShelly3emService:
         productid = 0xA144
     else:
         productid = 45069
+
+    # Connect to the sessionbus. Note that on ccgx we use systembus instead.
+    self._dbusConn = SessionBus() if 'DBUS_SESSION_BUS_ADDRESS' in os.environ else SystemBus()
 
     self._dbusservice = VeDbusService("{}.http_{:02d}".format(servicename, deviceinstance))
     self._paths = paths
@@ -153,7 +157,23 @@ class DbusShelly3emService:
     logging.info("Last '/Ac/Power': %s" % (self._dbusservice['/Ac/Power']))
     logging.info("--- End: sign of life ---")
     return True
- 
+  
+  def _getCombinedPower(self, shellyPower, goePowerPath, considerMp2 = False):
+    goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath).get_value()
+    multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P').get_value()
+
+    if not goePower:
+       goePower = 0
+       logging.debug("goePower path %s does not exist" % (goePowerPath))
+    
+    if not considerMp2:
+       multiplusPower = 0
+       logging.debug("mp2Power path not considered")
+
+    logging.debug("_getCombinedPower (shellyPower): %s (goePower): %s (multiplusPower): %s" % (shellyPower, goePower, multiplusPower))
+
+    return shellyPower + goePower + multiplusPower
+
   def _update(self):   
     try:
       #get data from Shelly 3em
@@ -178,9 +198,9 @@ class DbusShelly3emService:
       self._dbusservice['/Ac/L1/Current'] = meter_data['emeters'][0]['current']
       self._dbusservice['/Ac/L2/Current'] = meter_data['emeters'][1]['current']
       self._dbusservice['/Ac/L3/Current'] = meter_data['emeters'][2]['current']
-      self._dbusservice['/Ac/L1/Power'] = meter_data['emeters'][0]['power']
-      self._dbusservice['/Ac/L2/Power'] = meter_data['emeters'][1]['power']
-      self._dbusservice['/Ac/L3/Power'] = meter_data['emeters'][2]['power']
+      self._dbusservice['/Ac/L1/Power'] = self._getCombinedPower(meter_data['emeters'][0]['power'], '/Ac/L1/Power', True)
+      self._dbusservice['/Ac/L2/Power'] = self._getCombinedPower(meter_data['emeters'][1]['power'], '/Ac/L2/Power')
+      self._dbusservice['/Ac/L3/Power'] = self._getCombinedPower(meter_data['emeters'][2]['power'], '/Ac/L3/Power')
       self._dbusservice['/Ac/L1/Energy/Forward'] = (meter_data['emeters'][0]['total']/1000)
       self._dbusservice['/Ac/L2/Energy/Forward'] = (meter_data['emeters'][1]['total']/1000)
       self._dbusservice['/Ac/L3/Energy/Forward'] = (meter_data['emeters'][2]['total']/1000)
