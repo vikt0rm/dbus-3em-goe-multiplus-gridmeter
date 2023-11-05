@@ -16,7 +16,7 @@ import sys
 import time
 import requests # for http GET
 import configparser # for config/ini file
-from dbus import SessionBus, SystemBus
+from dbus import SessionBus, SystemBus, DBusException
  
 # our own packages from victron
 sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python'))
@@ -159,13 +159,22 @@ class DbusShelly3emService:
     return True
   
   def _getCombinedPower(self, shellyPower, goePowerPath, considerMp2 = False):
-    goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath).get_value()
-    multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P').get_value()
-
-    if not goePower:
+    try:
+       goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath).get_value()
+       if goePower is None:
+          goePower = 0
+    except DBusException:
        goePower = 0
        logging.debug("goePower path %s does not exist" % (goePowerPath))
-    
+       
+    try:
+       multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P').get_value()
+       if multiplusPower is None:
+          multiplusPower = 0
+    except DBusException:
+       multiplusPower = 0
+       logging.debug("mp2Power path does not exist")
+
     if not considerMp2:
        multiplusPower = 0
        logging.debug("mp2Power path not considered")
@@ -191,7 +200,6 @@ class DbusShelly3emService:
         meter_data['emeters'][remapL1-1] = old_l1
        
       #send data to DBus
-      self._dbusservice['/Ac/Power'] = meter_data['total_power']
       self._dbusservice['/Ac/L1/Voltage'] = meter_data['emeters'][0]['voltage']
       self._dbusservice['/Ac/L2/Voltage'] = meter_data['emeters'][1]['voltage']
       self._dbusservice['/Ac/L3/Voltage'] = meter_data['emeters'][2]['voltage']
@@ -201,6 +209,7 @@ class DbusShelly3emService:
       self._dbusservice['/Ac/L1/Power'] = self._getCombinedPower(meter_data['emeters'][0]['power'], '/Ac/L1/Power', True)
       self._dbusservice['/Ac/L2/Power'] = self._getCombinedPower(meter_data['emeters'][1]['power'], '/Ac/L2/Power')
       self._dbusservice['/Ac/L3/Power'] = self._getCombinedPower(meter_data['emeters'][2]['power'], '/Ac/L3/Power')
+      self._dbusservice['/Ac/Power'] = self._dbusservice['/Ac/L1/Power'] + self._dbusservice['/Ac/L2/Power'] + self._dbusservice['/Ac/L3/Power']
       self._dbusservice['/Ac/L1/Energy/Forward'] = (meter_data['emeters'][0]['total']/1000)
       self._dbusservice['/Ac/L2/Energy/Forward'] = (meter_data['emeters'][1]['total']/1000)
       self._dbusservice['/Ac/L3/Energy/Forward'] = (meter_data['emeters'][2]['total']/1000)
