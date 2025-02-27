@@ -29,6 +29,8 @@ class DbusShelly3emService:
     deviceinstance = int(config['DEFAULT']['DeviceInstance'])
     customname = config['DEFAULT']['CustomName']
     role = config['DEFAULT']['Role']
+    self.goeVoltage = None
+    self.multiplusVoltage = None
 
     allowed_roles = ['pvinverter','grid']
     if role in allowed_roles:
@@ -45,7 +47,8 @@ class DbusShelly3emService:
     # Connect to the sessionbus. Note that on ccgx we use systembus instead.
     self._dbusConn = SessionBus() if 'DBUS_SESSION_BUS_ADDRESS' in os.environ else SystemBus()
 
-    self._dbusservice = VeDbusService("{}.http_{:02d}".format(servicename, deviceinstance))
+    self._dbusServiceName = "{}.http_{:02d}".format(servicename, deviceinstance)
+    self._dbusservice = VeDbusService(self._dbusServiceName)
     self._paths = paths
  
     logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
@@ -135,7 +138,11 @@ class DbusShelly3emService:
  
   def _getShellyData(self):
     URL = self._getShellyStatusUrl()
-    meter_r = requests.get(url = URL, timeout=5)
+    meter_r = None
+    try:
+       meter_r = requests.get(url = URL, timeout=None)
+    except:
+       logging.warning("Something went wrong during Shelly Status request.")
     
     # check for response
     if not meter_r:
@@ -152,38 +159,97 @@ class DbusShelly3emService:
  
  
   def _signOfLife(self):
+    #dbusservice = VeDbusService(self._dbusServiceName)
     logging.info("--- Start: sign of life ---")
     logging.info("Last _update() call: %s" % (self._lastUpdate))
     logging.info("Last '/Ac/Power': %s" % (self._dbusservice['/Ac/Power']))
     logging.info("--- End: sign of life ---")
     return True
   
-  def _getCombinedPower(self, shellyPower, goePowerPath, considerMp2 = False):
-    try:
-       goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath).get_value()
+  def _getCombinedPower(self, shellyPower, goePowerPath, dbusPaths, considerMp2 = False):
+    goeDbusPath = "com.victronenergy.evcharger.http_43"
+    goePower = 0.0
+    goeConnected = goeDbusPath in dbusPaths
+    
+    if goeConnected:
+       goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath, None, False).get_value()
        if goePower is None:
-          goePower = 0
-    except DBusException:
-       goePower = 0
-       logging.debug("goePower path %s does not exist" % (goePowerPath))
-       
-    try:
-       multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P').get_value()
+          goePower = 0.0
+          logging.error("goePower is invalid")
+    else:
+       logging.debug("go-eCharger not connected")
+    
+    mp2DbusPath = "com.victronenergy.vebus.ttyUSB0"
+    multiplusPower = 0.0
+    mp2Ready = mp2DbusPath in dbusPaths
+    if mp2Ready:
+       multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P', None, False).get_value()
        if multiplusPower is None:
-          multiplusPower = 0
-    except DBusException:
-       multiplusPower = 0
-       logging.debug("mp2Power path does not exist")
+          multiplusPower = 0.0
+          logging.error("mp2Power is invalid")
+    else:
+       logging.error("mp2 is not ready yet")
 
     if not considerMp2:
        multiplusPower = 0
-       logging.debug("mp2Power path not considered")
+       logging.debug("mp2Power not considered")
 
     logging.debug("_getCombinedPower (shellyPower): %s (goePower): %s (multiplusPower): %s" % (shellyPower, goePower, multiplusPower))
 
     return shellyPower + goePower + multiplusPower
 
-  def _update(self):   
+  def _getCombinedAmps(self, shellyAmps, goePowerPath, dbusPaths, considerMp2 = False):
+
+    goeAmps = 0.0
+    goeDbusPath = "com.victronenergy.evcharger.http_43"
+    goeConnected = goeDbusPath in dbusPaths
+
+    if goeConnected:
+       goePower = VeDbusItemImport(self._dbusConn, goeDbusPath, goePowerPath, None, False).get_value()
+       if not self.goeVoltage:
+          self.goeVoltage = VeDbusItemImport(self._dbusConn, goeDbusPath, '/Ac/Voltage', None, False).get_value()
+          logging.info("goeVoltage imported: %s" % (self.goeVoltage))
+       goeVoltage = self.goeVoltage
+       if goePower is None or goeVoltage is None:
+          goePower = 0
+          logging.error("goe values are not plausible: goePower = %s goeVoltage = %s" % (goePower, goeVoltage))
+       elif goeVoltage > 0:
+          goeAmps = goePower / goeVoltage
+    else:
+       logging.debug("go-eCharger not connected")
+   
+    mp2DbusPath = "com.victronenergy.vebus.ttyUSB0"
+    multiplusAmps = 0.0
+    mp2Ready = mp2DbusPath in dbusPaths
+    if mp2Ready:
+       multiplusPower = VeDbusItemImport(self._dbusConn, mp2DbusPath, '/Ac/ActiveIn/L1/P', None, False).get_value()
+       if not self.multiplusVoltage:
+          self.multiplusVoltage = VeDbusItemImport(self._dbusConn, mp2DbusPath, '/Ac/ActiveIn/L1/V', None, False).get_value()
+          logging.info("multiplusVoltage imported: %s" % (self.multiplusVoltage))
+       multiplusVoltage = self.multiplusVoltage
+       
+       if multiplusPower is None or multiplusVoltage is None:
+          multiplusAmps = 0
+          logging.error("mp2 path does not exist")
+       elif multiplusVoltage > 0:
+          multiplusAmps = multiplusPower / multiplusVoltage
+    else:
+       logging.error("mp2 not ready yet")
+          
+    if not considerMp2:
+       multiplusAmps = 0
+       logging.debug("mp2Power path not considered")
+
+    logging.debug("_getCombinedAmps (shellyAmps): %s (goeAmps): %s (multiplusAmps): %s" % (shellyAmps, goeAmps, multiplusAmps))
+
+    return shellyAmps + goeAmps + multiplusAmps
+
+  def _getEnergyFromPower(self, power):
+     # New Version - from xris99
+     #Calc = 60min * 60 sec / 0.500 (refresh interval of 500ms) * 1000
+     return power/(60*60/0.5*1000)
+
+  def _update(self): 
     try:
       #get data from Shelly 3em
       meter_data = self._getShellyData()
@@ -198,42 +264,47 @@ class DbusShelly3emService:
         old_l1 = meter_data['emeters'][0]
         meter_data['emeters'][0] = meter_data['emeters'][remapL1-1]
         meter_data['emeters'][remapL1-1] = old_l1
-       
+ 
+      dbusPaths = self._dbusConn.list_names()
       #send data to DBus
       self._dbusservice['/Ac/L1/Voltage'] = meter_data['emeters'][0]['voltage']
       self._dbusservice['/Ac/L2/Voltage'] = meter_data['emeters'][1]['voltage']
       self._dbusservice['/Ac/L3/Voltage'] = meter_data['emeters'][2]['voltage']
-      self._dbusservice['/Ac/L1/Current'] = meter_data['emeters'][0]['current']
-      self._dbusservice['/Ac/L2/Current'] = meter_data['emeters'][1]['current']
-      self._dbusservice['/Ac/L3/Current'] = meter_data['emeters'][2]['current']
-      self._dbusservice['/Ac/L1/Power'] = self._getCombinedPower(meter_data['emeters'][0]['power'], '/Ac/L1/Power', True)
-      self._dbusservice['/Ac/L2/Power'] = self._getCombinedPower(meter_data['emeters'][1]['power'], '/Ac/L2/Power')
-      self._dbusservice['/Ac/L3/Power'] = self._getCombinedPower(meter_data['emeters'][2]['power'], '/Ac/L3/Power')
+      self._dbusservice['/Ac/L1/Current'] = self._getCombinedAmps(meter_data['emeters'][0]['current'] * meter_data['emeters'][0]['pf'],  '/Ac/L1/Power', dbusPaths, True)
+      self._dbusservice['/Ac/L2/Current'] = self._getCombinedAmps(meter_data['emeters'][1]['current'] * meter_data['emeters'][1]['pf'], '/Ac/L2/Power', dbusPaths)
+      self._dbusservice['/Ac/L3/Current'] = self._getCombinedAmps(meter_data['emeters'][2]['current'] * meter_data['emeters'][2]['pf'], '/Ac/L3/Power', dbusPaths)
+      self._dbusservice['/Ac/L1/Power'] = self._getCombinedPower(meter_data['emeters'][0]['power'], '/Ac/L1/Power', dbusPaths, True)
+      self._dbusservice['/Ac/L2/Power'] = self._getCombinedPower(meter_data['emeters'][1]['power'], '/Ac/L2/Power', dbusPaths)
+      self._dbusservice['/Ac/L3/Power'] = self._getCombinedPower(meter_data['emeters'][2]['power'], '/Ac/L3/Power', dbusPaths)
       self._dbusservice['/Ac/Power'] = self._dbusservice['/Ac/L1/Power'] + self._dbusservice['/Ac/L2/Power'] + self._dbusservice['/Ac/L3/Power']
-      self._dbusservice['/Ac/L1/Energy/Forward'] = (meter_data['emeters'][0]['total']/1000)
+      
+      if (self._dbusservice['/Ac/L1/Power'] > 0):
+         self._dbusservice['/Ac/L1/Energy/Forward'] = self._dbusservice['/Ac/L1/Energy/Forward'] + self._getEnergyFromPower(self._dbusservice['/Ac/L1/Power']) 
+      else:
+         self._dbusservice['/Ac/L1/Energy/Reverse'] = self._dbusservice['/Ac/L1/Energy/Reverse'] + self._getEnergyFromPower(self._dbusservice['/Ac/L1/Power']*-1) 
+         
       self._dbusservice['/Ac/L2/Energy/Forward'] = (meter_data['emeters'][1]['total']/1000)
       self._dbusservice['/Ac/L3/Energy/Forward'] = (meter_data['emeters'][2]['total']/1000)
-      self._dbusservice['/Ac/L1/Energy/Reverse'] = (meter_data['emeters'][0]['total_returned']/1000) 
       self._dbusservice['/Ac/L2/Energy/Reverse'] = (meter_data['emeters'][1]['total_returned']/1000) 
       self._dbusservice['/Ac/L3/Energy/Reverse'] = (meter_data['emeters'][2]['total_returned']/1000) 
       
       # Old version
-      #self._dbusservice['/Ac/Energy/Forward'] = self._dbusservice['/Ac/L1/Energy/Forward'] + self._dbusservice['/Ac/L2/Energy/Forward'] + self._dbusservice['/Ac/L3/Energy/Forward']
-      #self._dbusservice['/Ac/Energy/Reverse'] = self._dbusservice['/Ac/L1/Energy/Reverse'] + self._dbusservice['/Ac/L2/Energy/Reverse'] + self._dbusservice['/Ac/L3/Energy/Reverse'] 
+      #dbusservice['/Ac/Energy/Forward'] = dbusservice['/Ac/L1/Energy/Forward'] + dbusservice['/Ac/L2/Energy/Forward'] + dbusservice['/Ac/L3/Energy/Forward']
+      #dbusservice['/Ac/Energy/Reverse'] = dbusservice['/Ac/L1/Energy/Reverse'] + dbusservice['/Ac/L2/Energy/Reverse'] + dbusservice['/Ac/L3/Energy/Reverse'] 
       
       # New Version - from xris99
       #Calc = 60min * 60 sec / 0.500 (refresh interval of 500ms) * 1000
       if (self._dbusservice['/Ac/Power'] > 0):
-           self._dbusservice['/Ac/Energy/Forward'] = self._dbusservice['/Ac/Energy/Forward'] + (self._dbusservice['/Ac/Power']/(60*60/0.5*1000))            
+           self._dbusservice['/Ac/Energy/Forward'] = self._dbusservice['/Ac/Energy/Forward'] + self._getEnergyFromPower(self._dbusservice['/Ac/Power'])            
       if (self._dbusservice['/Ac/Power'] < 0):
-           self._dbusservice['/Ac/Energy/Reverse'] = self._dbusservice['/Ac/Energy/Reverse'] + (self._dbusservice['/Ac/Power']*-1/(60*60/0.5*1000))
+           self._dbusservice['/Ac/Energy/Reverse'] = self._dbusservice['/Ac/Energy/Reverse'] + self._getEnergyFromPower(self._dbusservice['/Ac/Power']*-1)
 
       
       #logging
       logging.debug("House Consumption (/Ac/Power): %s" % (self._dbusservice['/Ac/Power']))
       logging.debug("House Forward (/Ac/Energy/Forward): %s" % (self._dbusservice['/Ac/Energy/Forward']))
       logging.debug("House Reverse (/Ac/Energy/Revers): %s" % (self._dbusservice['/Ac/Energy/Reverse']))
-      logging.debug("---");
+      logging.debug("---")
       
       # increment UpdateIndex - to show that new data is available an wrap
       self._dbusservice['/UpdateIndex'] = (self._dbusservice['/UpdateIndex'] + 1 ) % 256
@@ -284,7 +355,7 @@ def main():
                             ])
  
   try:
-      logging.info("Start");
+      logging.info("Start")
   
       from dbus.mainloop.glib import DBusGMainLoop
       # Have a mainloop, so we can send/receive asynchronous calls to and from dbus
