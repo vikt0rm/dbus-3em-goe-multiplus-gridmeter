@@ -5,14 +5,13 @@
 import platform 
 import logging
 import logging.handlers
-import sys
+from logging.handlers import RotatingFileHandler
 import os
 import sys
 if sys.version_info.major == 2:
     import gobject
 else:
     from gi.repository import GLib as gobject
-import sys
 import time
 import requests # for http GET
 import configparser # for config/ini file
@@ -48,7 +47,7 @@ class DbusShelly3emService:
     self._dbusConn = SessionBus() if 'DBUS_SESSION_BUS_ADDRESS' in os.environ else SystemBus()
 
     self._dbusServiceName = "{}.http_{:02d}".format(servicename, deviceinstance)
-    self._dbusservice = VeDbusService(self._dbusServiceName)
+    self._dbusservice = VeDbusService(self._dbusServiceName, register=False)
     self._paths = paths
  
     logging.debug("%s /DeviceInstance = %d" % (servicename, deviceinstance))
@@ -77,7 +76,10 @@ class DbusShelly3emService:
     for path, settings in self._paths.items():
       self._dbusservice.add_path(
         path, settings['initial'], gettextcallback=settings['textformat'], writeable=True, onchangecallback=self._handlechangedvalue)
- 
+    
+    # register the dbus service
+    self._dbusservice.register()
+
     # last update
     self._lastUpdate = 0
  
@@ -350,7 +352,7 @@ def main():
                             datefmt='%Y-%m-%d %H:%M:%S',
                             level=getLogLevel(),
                             handlers=[
-                                logging.FileHandler("%s/current.log" % (os.path.dirname(os.path.realpath(__file__)))),
+                                RotatingFileHandler("%s/current.log" % (os.path.dirname(os.path.realpath(__file__))), maxBytes=10000),
                                 logging.StreamHandler()
                             ])
  
