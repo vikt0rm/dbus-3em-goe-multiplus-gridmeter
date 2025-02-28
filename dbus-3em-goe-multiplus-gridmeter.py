@@ -146,7 +146,11 @@ class DbusShelly3emService:
     try:
        meter_r = requests.get(url = URL, timeout=1)
     except requests.exceptions.Timeout:
-        logging.warning("Timeout during Shelly Status request.")
+        logging.warning("Timeout during Shelly Status request. Retrying...")
+        try:
+            meter_r = requests.get(url = URL, timeout=1)
+        except requests.exceptions.Timeout:
+            logging.error("Timeout during Shelly Status request. Giving up...")
     except requests.exceptions.RequestException as e:
         logging.error("Error during Shelly Status request: %s" % (e))
         
@@ -274,6 +278,8 @@ class DbusShelly3emService:
     try:
       #get data from Shelly 3em
       meter_data = self._getShellyData()
+      if meter_data is None:
+          raise ValueError("Failed to retrieve data from Shelly")
       config = self._getConfig()
 
       try:
