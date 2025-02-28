@@ -102,7 +102,7 @@ class DbusShelly3emService:
   def _getConfig(self):
     config = configparser.ConfigParser()
     config.read("%s/config.ini" % (os.path.dirname(os.path.realpath(__file__))))
-    return config;
+    return config
  
  
   def _getSignOfLifeInterval(self):
@@ -141,21 +141,22 @@ class DbusShelly3emService:
   def _getShellyData(self):
     URL = self._getShellyStatusUrl()
     meter_r = None
+    meter_data = None
+
     try:
-       meter_r = requests.get(url = URL, timeout=None)
-    except:
-       logging.warning("Something went wrong during Shelly Status request.")
-    
+       meter_r = requests.get(url = URL, timeout=1)
+    except requests.exceptions.Timeout:
+        logging.warning("Timeout during Shelly Status request.")
+    except requests.exceptions.RequestException as e:
+        logging.error("Error during Shelly Status request: %s" % (e))
+        
     # check for response
-    if not meter_r:
-        raise ConnectionError("No response from Shelly 3EM - %s" % (URL))
-    
-    meter_data = meter_r.json()     
+    if meter_r:
+       meter_data = meter_r.json()     
     
     # check for Json
     if not meter_data:
-        raise ValueError("Converting response to JSON failed")
-    
+        logging.error("Converting shelly response to JSON failed")
     
     return meter_data
  
@@ -174,10 +175,11 @@ class DbusShelly3emService:
     goeConnected = goeDbusPath in dbusPaths
     
     if goeConnected:
-       goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath, None, False).get_value()
-       if goePower is None:
-          goePower = 0.0
-          logging.error("goePower is invalid")
+       try:
+           goePower = VeDbusItemImport(self._dbusConn, "com.victronenergy.evcharger.http_43", goePowerPath, None, False).get_value()
+       except DBusException as e:
+           goePower = 0.0
+           logging.error("Failed to import goePower: %s", e)
     else:
        logging.debug("go-eCharger not connected")
     
@@ -185,15 +187,16 @@ class DbusShelly3emService:
     multiplusPower = 0.0
     mp2Ready = mp2DbusPath in dbusPaths
     if mp2Ready:
-       multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P', None, False).get_value()
-       if multiplusPower is None:
+       try:
+          multiplusPower = VeDbusItemImport(self._dbusConn, "com.victronenergy.vebus.ttyUSB0", '/Ac/ActiveIn/P', None, False).get_value()
+       except DBusException as e:    
           multiplusPower = 0.0
-          logging.error("mp2Power is invalid")
+          logging.error("Failed to import mp2Power: %s", e)
     else:
        logging.error("mp2 is not ready yet")
 
     if not considerMp2:
-       multiplusPower = 0
+       multiplusPower = 0.0
        logging.debug("mp2Power not considered")
 
     logging.debug("_getCombinedPower (shellyPower): %s (goePower): %s (multiplusPower): %s" % (shellyPower, goePower, multiplusPower))
@@ -205,17 +208,25 @@ class DbusShelly3emService:
     goeAmps = 0.0
     goeDbusPath = "com.victronenergy.evcharger.http_43"
     goeConnected = goeDbusPath in dbusPaths
+    goePower = 0.0
 
     if goeConnected:
-       goePower = VeDbusItemImport(self._dbusConn, goeDbusPath, goePowerPath, None, False).get_value()
-       if not self.goeVoltage:
-          self.goeVoltage = VeDbusItemImport(self._dbusConn, goeDbusPath, '/Ac/Voltage', None, False).get_value()
-          logging.info("goeVoltage imported: %s" % (self.goeVoltage))
-       goeVoltage = self.goeVoltage
-       if goePower is None or goeVoltage is None:
+        try:
+          goePower = VeDbusItemImport(self._dbusConn, goeDbusPath, goePowerPath, None, False).get_value()
+        except DBusException as e:
+          goePower = 0.0
+          logging.error("Failed to import goePower: %s", e)
+        if not self.goeVoltage:
+          try:
+            self.goeVoltage = VeDbusItemImport(self._dbusConn, goeDbusPath, '/Ac/Voltage', None, False).get_value()
+          except DBusException as e:
+            self.goeVoltage = 0.0
+            logging.error("Failed to import goeVoltage: %s", e)
+        goeVoltage = self.goeVoltage
+        if goePower is None or goeVoltage is None:
           goePower = 0
           logging.error("goe values are not plausible: goePower = %s goeVoltage = %s" % (goePower, goeVoltage))
-       elif goeVoltage > 0:
+        elif goeVoltage > 0:
           goeAmps = goePower / goeVoltage
     else:
        logging.debug("go-eCharger not connected")
@@ -224,16 +235,24 @@ class DbusShelly3emService:
     multiplusAmps = 0.0
     mp2Ready = mp2DbusPath in dbusPaths
     if mp2Ready:
-       multiplusPower = VeDbusItemImport(self._dbusConn, mp2DbusPath, '/Ac/ActiveIn/L1/P', None, False).get_value()
-       if not self.multiplusVoltage:
-          self.multiplusVoltage = VeDbusItemImport(self._dbusConn, mp2DbusPath, '/Ac/ActiveIn/L1/V', None, False).get_value()
-          logging.info("multiplusVoltage imported: %s" % (self.multiplusVoltage))
-       multiplusVoltage = self.multiplusVoltage
+        try:
+          multiplusPower = VeDbusItemImport(self._dbusConn, mp2DbusPath, '/Ac/ActiveIn/L1/P', None, False).get_value()
+        except DBusException as e:
+          multiplusPower = 0.0
+          logging.error("Failed to import mp2Power: %s", e)
+        if not self.multiplusVoltage:
+          try:
+            self.multiplusVoltage = VeDbusItemImport(self._dbusConn, mp2DbusPath, '/Ac/ActiveIn/L1/V', None, False).get_value()
+            logging.info("multiplusVoltage imported: %s" % (self.multiplusVoltage))
+          except DBusException as e:
+            self.multiplusVoltage = 0.0
+            logging.error("Failed to import multiplusVoltage: %s", e)
+        multiplusVoltage = self.multiplusVoltage
        
-       if multiplusPower is None or multiplusVoltage is None:
+        if multiplusPower is None or multiplusVoltage is None:
           multiplusAmps = 0
           logging.error("mp2 path does not exist")
-       elif multiplusVoltage > 0:
+        elif multiplusVoltage > 0:
           multiplusAmps = multiplusPower / multiplusVoltage
     else:
        logging.error("mp2 not ready yet")
@@ -289,10 +308,6 @@ class DbusShelly3emService:
       self._dbusservice['/Ac/L3/Energy/Forward'] = (meter_data['emeters'][2]['total']/1000)
       self._dbusservice['/Ac/L2/Energy/Reverse'] = (meter_data['emeters'][1]['total_returned']/1000) 
       self._dbusservice['/Ac/L3/Energy/Reverse'] = (meter_data['emeters'][2]['total_returned']/1000) 
-      
-      # Old version
-      #dbusservice['/Ac/Energy/Forward'] = dbusservice['/Ac/L1/Energy/Forward'] + dbusservice['/Ac/L2/Energy/Forward'] + dbusservice['/Ac/L3/Energy/Forward']
-      #dbusservice['/Ac/Energy/Reverse'] = dbusservice['/Ac/L1/Energy/Reverse'] + dbusservice['/Ac/L2/Energy/Reverse'] + dbusservice['/Ac/L3/Energy/Reverse'] 
       
       # New Version - from xris99
       #Calc = 60min * 60 sec / 0.500 (refresh interval of 500ms) * 1000
