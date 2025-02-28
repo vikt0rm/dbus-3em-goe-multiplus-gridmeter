@@ -144,11 +144,11 @@ class DbusShelly3emService:
     meter_data = None
 
     try:
-       meter_r = requests.get(url = URL, timeout=1)
+       meter_r = requests.get(url = URL, timeout=2)
     except requests.exceptions.Timeout:
         logging.warning("Timeout during Shelly Status request. Retrying...")
         try:
-            meter_r = requests.get(url = URL, timeout=1)
+            meter_r = requests.get(url = URL, timeout=2)
         except requests.exceptions.Timeout:
             logging.error("Timeout during Shelly Status request. Giving up...")
     except requests.exceptions.RequestException as e:
