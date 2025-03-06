@@ -143,20 +143,20 @@ class DbusShelly3emService:
     meter_r = None
     meter_data = None
 
-    try:
-       meter_r = requests.get(url = URL, timeout=2)
-    except requests.exceptions.Timeout:
-        logging.warning("Timeout during Shelly Status request. Retrying...")
-        try:
-            meter_r = requests.get(url = URL, timeout=2)
-        except requests.exceptions.Timeout:
-            logging.error("Timeout during Shelly Status request. Giving up...")
-    except requests.exceptions.RequestException as e:
-        logging.error("Error during Shelly Status request: %s" % (e))
-        
-    # check for response
-    if meter_r:
-       meter_data = meter_r.json()     
+    retries = 1
+    while meter_r is None:
+       try:
+          meter_r = requests.get(url = URL, timeout=retries)
+          meter_data = meter_r.json()
+       except requests.exceptions.Timeout:
+          logging.warning("{}. timeout during Shelly Status request. Retrying...".format(retries))
+       except Exception as e:
+          logging.warning("Error during Shelly Status request: %s" % (e))
+       finally:
+          retries += 1
+          if retries > 3:
+             logging.error("Failed to get data from Shelly")
+             break
     
     # check for Json
     if not meter_data:
@@ -297,7 +297,7 @@ class DbusShelly3emService:
       self._dbusservice['/Ac/L1/Voltage'] = meter_data['emeters'][0]['voltage']
       self._dbusservice['/Ac/L2/Voltage'] = meter_data['emeters'][1]['voltage']
       self._dbusservice['/Ac/L3/Voltage'] = meter_data['emeters'][2]['voltage']
-      self._dbusservice['/Ac/L1/Current'] = self._getCombinedAmps(meter_data['emeters'][0]['current'] * meter_data['emeters'][0]['pf'],  '/Ac/L1/Power', dbusPaths, True)
+      self._dbusservice['/Ac/L1/Current'] = self._getCombinedAmps(meter_data['emeters'][0]['current'] * meter_data['emeters'][0]['pf'], '/Ac/L1/Power', dbusPaths, True)
       self._dbusservice['/Ac/L2/Current'] = self._getCombinedAmps(meter_data['emeters'][1]['current'] * meter_data['emeters'][1]['pf'], '/Ac/L2/Power', dbusPaths)
       self._dbusservice['/Ac/L3/Current'] = self._getCombinedAmps(meter_data['emeters'][2]['current'] * meter_data['emeters'][2]['pf'], '/Ac/L3/Power', dbusPaths)
       self._dbusservice['/Ac/L1/Power'] = self._getCombinedPower(meter_data['emeters'][0]['power'], '/Ac/L1/Power', dbusPaths, True)
@@ -357,10 +357,10 @@ class DbusShelly3emService:
 def getLogLevel():
   config = configparser.ConfigParser()
   config.read("%s/config.ini" % (os.path.dirname(os.path.realpath(__file__))))
-  logLevelString = config['DEFAULT']['LogLevel']
+  logLevelString = config['DEFAULT']['LogLevel'].upper()
   
   if logLevelString:
-    level = logging.getLevelName(logLevelString)
+    level = logLevelString
   else:
     level = logging.INFO
     
